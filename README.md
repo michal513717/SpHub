@@ -48,45 +48,67 @@ python main.py
 
 ```
 SpHub/
-├── knowledge/          # Source documents (read-only)
-│   ├── 01-company-overview.md
-│   └── …
+├── knowledge/       # Source documents (read-only, 15 .md files)
 ├── src/
-│   ├── document_loader.py   # File hashing + markdown chunking
-│   ├── embedding_service.py # multilingual-e5-small wrapper
-│   ├── index_service.py     # FAISS index + atomic state file
-│   └── rag_service.py       # Retrieval + Claude generation
-├── data/               # Generated cache — gitignored, auto-rebuilt
-│   └── index.pkl
-├── main.py             # CLI entry point
-└── requirements.txt
+│   ├── utils/
+│   ├── types/
+│   ├── services/
+│   │   └── llm/
+│   ├── commands/
+│   └── queries/
+├── data/            # Generated cache (.gitignored)
+├── main.py
+├── requirements.txt
+└── README.md
 ```
 
-## How caching works
+## How it works
 
-On first run (or after `--rebuild`) the tool:
+### Caching strategy
 
-1. Reads all `.md` files from `knowledge/`
-2. Computes a SHA-256 hash per file
-3. Splits each file into chunks (headers preserved as context for table rows)
-4. Embeds all chunks with `multilingual-e5-small`
-5. Builds a FAISS inner-product index
-6. Writes everything atomically to `data/index.pkl`
+On first run (or after `--rebuild`):
 
-On subsequent runs it compares stored hashes against current file hashes.
-If they match, the index is loaded from cache (~1 s).  If any file changed or
-a new file was added, the entire index is rebuilt.
+1. Read all `.md` files from `knowledge/` → compute SHA-256 hash per file
+2. Split each file into chunks at H1/H2/H3 header boundaries (preserves full context, no mid-table splits)
+3. Embed all chunks with `multilingual-e5-small` (with `"passage: "` prefix)
+4. Build FAISS `IndexFlatIP` (inner-product, normalized = cosine similarity)
+5. Write atomically to `data/index.pkl`:
+   - `file_hashes`: {filename: sha256}
+   - `chunks`: serialized Chunk objects  
+   - `faiss_index`: binary FAISS index
 
-## Extending to an API / CQRS
+On subsequent runs:
+- Compare stored hashes vs. current file hashes
+- If match → load from cache (~1 s)
+- If mismatch (any file changed/added) → rebuild entire index
 
-`IndexService` is intentionally a standalone class — it can be triggered from
-any context (CLI, HTTP handler, queue consumer) by calling:
+### Query flow
+
+1. User asks a question
+2. Embed query with `"query: "` prefix → 384-dim vector
+3. FAISS search → top 5 most similar chunks
+4. Format chunks as context → send to Claude
+5. Stream response from Claude (tokenized real-time)
+6. Return answer + source chunks
+
+## Architecture notes
+
+### CQRS separation
+
+The codebase is structured as CQRS (Command Query Responsibility Segregation):
+
+- **Write side**: `BuildIndexHandler` — rebuilds the index (triggered by `BuildIndexCommand`)
+- **Read side**: `AnswerQueryHandler` — retrieves chunks and generates answers (uses `AnswerQuery`)
+- **State**: `IndexService` — mutable repository (FAISS index + file hashes)
+- **LLM injection**: `AbstractLLMService` — swap `ClaudeLLMService` for any other provider without touching retrieval logic
+
+### Extending to an API / async queue
+
+Current wiring in `main.py`:
 
 ```python
-index = IndexService(loader, embedder)
-index.build_or_load(force_rebuild=True)
+BuildIndexHandler(index).handle(BuildIndexCommand(force_rebuild=args.rebuild))
+llm = ClaudeLLMService()
+handler = AnswerQueryHandler(index, embedder, llm)
+handler.handle(AnswerQuery(question="..."))
 ```
-
-A future file-watching worker (e.g., polling `knowledge/` every N seconds or
-every M new files) would simply instantiate `IndexService` and call this method
-without any changes to the core pipeline.
