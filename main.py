@@ -13,6 +13,8 @@ Environment:
 from __future__ import annotations
 
 import argparse
+import os
+import sys
 
 from src.commands.build_index import BuildIndexHandler
 from src.queries.answer_question import AnswerQueryHandler
@@ -34,7 +36,17 @@ def _build_handlers(force_rebuild: bool) -> AnswerQueryHandler:
     return AnswerQueryHandler(index, embedder, llm)
 
 
+def _check_env() -> None:
+    if not os.environ.get("ANTHROPIC_API_KEY"):
+        print("Błąd: brak zmiennej środowiskowej ANTHROPIC_API_KEY.", file=sys.stderr)
+        print("Ustaw klucz i spróbuj ponownie:", file=sys.stderr)
+        print("  $env:ANTHROPIC_API_KEY = 'sk-ant-...'   # PowerShell", file=sys.stderr)
+        print("  export ANTHROPIC_API_KEY='sk-ant-...'   # bash", file=sys.stderr)
+        sys.exit(1)
+
+
 def main() -> None:
+    _check_env()
     parser = argparse.ArgumentParser(
         prog="sphub-qa",
         description="SpaceHub knowledge-base Q&A powered by RAG + Claude",
