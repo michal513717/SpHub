@@ -44,6 +44,7 @@ class IndexService:
         self._embedder = embedder
         self._state_file = state_file
         self._chunks: list[Chunk] = []
+        # na ten uzytek starczy nawet zwykly numpy :) 
         self._faiss_index: faiss.Index | None = None
 
     def build_or_load(self, force_rebuild: bool = False) -> None:
