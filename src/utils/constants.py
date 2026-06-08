@@ -9,7 +9,6 @@ EMBEDDING_MODEL: str = "intfloat/multilingual-e5-small"
 CLAUDE_MODEL: str = "claude-haiku-4-5-20251001"
 
 TOP_K: int = 5
-MAX_CHUNK_CHARS: int = 800
 
 SYSTEM_PROMPT: str = """\
 Jesteś pomocnym asystentem obsługi klienta firmy SpaceHub — sieci biur coworkingowych w Krakowie.
